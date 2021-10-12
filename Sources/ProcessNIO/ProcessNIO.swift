@@ -28,11 +28,12 @@ public struct ChildProcess {
 
   public init(executableURL: URL) {
     self.process.executableURL = executableURL
-    self.process.standardOutput = pipe
-    self.process.standardError = pipe
+    // self.process.standardOutput = pipe
+    // self.process.standardError = pipe
   }
 
   public init(path: String) {
+    print("path")
     self.process.standardOutput = pipe
     self.process.standardError = pipe
   }
@@ -41,14 +42,19 @@ public struct ChildProcess {
     process.arguments = args
     let nioHandle = NIOFileHandle.init(descriptor: pipe.fileHandleForReading.fileDescriptor)
     ChildProcess.queue.async {
-      try! process.run()
+      print("Launching process?")
+      process.launch()
+      print("Waiting \(process.arguments) \(process.executableURL)")
+      process.waitUntilExit()
+      print("Hi")
     }
     return fileIO.readChunked(
       fileHandle: nioHandle,
       byteCount: 1024*1024*10,
-      chunkSize: 32,
+      chunkSize: 1,
       allocator: ByteBufferAllocator.init(),
       eventLoop: eventLoop) { buffer -> EventLoopFuture<Void> in
+        print("Got bytes?")
         var readable = buffer
         let bytes = readable.readBytes(length: buffer.readableBytes) ?? []
         let out = String(bytes: bytes, encoding: .utf8)

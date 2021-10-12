@@ -7,41 +7,21 @@ import Glibc
 import Darwin
 #endif
 
-
-var actions_t = posix_spawn_file_actions_t()
-posix_spawn_file_actions_init(&actions_t)
-
-let pipe = Pipe()
-let handle = pipe.fileHandleForWriting
-
-posix_spawn_file_actions_adddup2(&actions_t, 2, handle.fileDescriptor)
-posix_spawn_file_actions_adddup2(&actions_t, 1, handle.fileDescriptor)
-
-// posix_spawnp (&child_pid, "date", &child_fd_actions, NULL, argv, env)
-var args2: [UnsafeMutablePointer<CChar>?] = []
-
-func addArg(_ args: inout [UnsafeMutablePointer<CChar>?], _ value: String) {
-  var bla = value.utf8CString
-  var ptr = UnsafeMutablePointer<CChar>(mutating: value.cString(using: .utf8))
-  args2.append(ptr)
-//  value.withCString { ptr in
-//    args2.append(UnsafeMutablePointer<Int8>(mutating: ptr))
-//  }
-}
-
-func addArgs(_ args: inout [UnsafeMutablePointer<CChar>?], _ values: [String]) {
-  for arg in values {
-    addArg(&args, arg)
-  }
-}
-
 let ffArgs = [
   "-hide_banner",
   "-y",
   "-i",
   "stmary.mp4",
   "-c:v",
-  "copy",
+  "libx264",
+  "-movflags",
+  "+faststart",
+  "-pix_fmt",
+  "yuv420p",
+  "-preset",
+  "veryfast",
+  "-crf",
+  "23",
   "-c:a",
   "aac",
   "-b:a",
@@ -51,14 +31,25 @@ let ffArgs = [
   "output2.mp4"
 ]
 
-var test2 = ffArgs.map { $0.cString(using: .utf8) }.map { UnsafeMutablePointer<CChar>(mutating: $0) }
+var bla2 = try spawn("/usr/local/bin/ffmpeg", args: ffArgs)
+var status: Int32 = 0
+waitpid(bla2, &status, 0)
+print("FFmpeg status: \(status)")
 
-print("Stuff?")
+var actions_t: posix_spawn_file_actions_t?
+posix_spawn_file_actions_init(&actions_t)
 
-args2.append(nil)
+let pipe = Pipe()
+let handle = pipe.fileHandleForWriting
+
+// posix_spawn_file_actions_adddup2(&actions_t, 2, handle.fileDescriptor)
+// posix_spawn_file_actions_adddup2(&actions_t, 1, handle.fileDescriptor)
+
+let unsafeArgs = ffArgs.map { $0.withCString(strdup) } + [nil]
+
 // args2.append("/usr/bin/ffmpeg".cString(using: .utf8))
 var pid: pid_t = 0
-let rc = posix_spawn(&pid, "/usr/bin/ffmpeg", &actions_t, nil, [nil], [nil])
+let rc = posix_spawn(&pid, "/usr/bin/ffmpeg", &actions_t, nil, unsafeArgs, [nil])
 print("rc: \(rc)")
 print("pid: \(pid)")
 waitpid(pid, nil, 0)
@@ -107,6 +98,7 @@ let args = [
 
 var nextLine: String = ""
 func checkLine() -> String? {
+  print("Checkline: \(nextLine)")
   if nextLine.contains("\n") || nextLine.contains("\r") {
     let lines = nextLine.split(separator: "\n")
     if lines.count == 0 {
