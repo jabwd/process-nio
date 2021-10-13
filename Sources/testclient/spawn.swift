@@ -89,13 +89,25 @@ public final class ProcessManager {
       return
     }
 
+    #if os(Linux)
+    let pid: Int32 = 0
+    #else
     let pid = info.pointee.si_pid
+    #endif
     if let oldChild = children[pid] {
       print("Closing child at PID \(pid)")
       var status: Int32 = 0
       waitpid(pid, &status, WNOHANG)
       oldChild.cleanup()
       children.removeValue(forKey: pid)
+    } else {
+      var status: Int32 = 0
+      let foundPid = waitpid(-1, &status, WNOHANG)
+      if let oldChild = children[foundPid] {
+        oldChild.cleanup()
+        children.removeValue(forKey: foundPid)
+        print("Closing child at \(foundPid)")
+      }
     }
   }
 
