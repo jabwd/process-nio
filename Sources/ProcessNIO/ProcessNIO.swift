@@ -44,7 +44,7 @@ public struct ChildProcess {
     ChildProcess.queue.async {
       print("Launching process?")
       process.launch()
-      print("Waiting \(process.arguments) \(process.executableURL)")
+      print("Waiting \(String(describing: process.arguments)) \(String(describing: process.executableURL))")
       process.waitUntilExit()
       print("Hi")
     }
