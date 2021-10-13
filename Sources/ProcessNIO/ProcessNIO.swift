@@ -12,18 +12,48 @@
 #endif
 import NIO
 
+extension String {
+  static func errno(_ errnum: Int32) -> String? {
+    if let err = strerror(errnum) {
+      return String(cString: err)
+    }
+    return nil
+  }
+}
+
 public typealias SigactionHandler = @convention(c)(Int32, UnsafeMutablePointer<siginfo_t>?, UnsafeMutableRawPointer?) -> Void
 
 public final class ProcessNIO {
   public let channel: Channel
   private(set) var pid: Int32?
+  public internal(set) var terminationStatus: Int32?
   private let readDescriptor: Int32
   private let writeDescriptor: Int32
   private let arguments: [String]
   private let path: String
 
-  public static func findPathFor(name: String) -> String? {
-    return nil
+  public static func findPathFor(name: String, eventLoopGroup: EventLoopGroup) -> EventLoopFuture<String> {
+    do {
+      var path: String = ""
+      let process = try ProcessNIO(
+        path: "/usr/bin/which", 
+        args: [name],
+        eventLoopGroup: eventLoopGroup,
+        onRead: { output in
+          path += output
+        }
+      )
+
+      return try process.run().map { _ -> String in
+        if path.count > 0 {
+          // Remove the newline at the end of the result
+          path.removeLast()
+        }
+        return path
+      }
+    } catch {
+      return eventLoopGroup.next().makeFailedFuture(error)
+    }
   }
 
   public init(
@@ -48,7 +78,11 @@ public final class ProcessNIO {
       .withPipes(inputDescriptor: readDescriptor, outputDescriptor: writeDescriptor).wait()
   }
 
-  public func run() throws -> EventLoopFuture<Void> {
+  deinit {
+    cleanup()
+  }
+
+  public func run() throws -> EventLoopFuture<Int32> {
 #if os(Linux)
     var fileActions = posix_spawn_file_actions_t()
 #else
@@ -67,16 +101,20 @@ public final class ProcessNIO {
       if rc == ENOENT {
         throw ProcessNIOError.fileNotFound
       }
-      let err = strerror(rc)
-      if let err = err {
-        throw ProcessNIOError.spawnFailed(rc, reason: String(cString: err))
-      }
-      throw ProcessNIOError.spawnFailed(rc, reason: nil)
+      throw ProcessNIOError.spawnFailed(rc, reason: String.errno(rc))
     }
 
     pid = newPid
     ProcessManager.shared.register(process: self)
-    return channel.closeFuture
+    return channel.closeFuture.flatMap { _ -> EventLoopFuture<Int32> in
+      guard let status = self.terminationStatus else {
+        return self.channel.eventLoop.makeSucceededFuture(-1)
+      }
+      guard status == 0 else {
+        return self.channel.eventLoop.makeFailedFuture(ProcessNIOError.nonZeroExit(status))
+      }
+      return self.channel.eventLoop.makeSucceededFuture(status)
+    }
   }
 
   internal func cleanup() {

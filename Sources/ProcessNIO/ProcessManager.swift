@@ -52,7 +52,12 @@ public final class ProcessManager {
     var pid: Int32 = 0
     repeat {
       pid = waitpid(-1, &status, WNOHANG)
+      if pid < 0 {
+        break
+      }
+      let terminationStatus = (status & 0xFF00) >> 8
       if let oldChild = children.removeValue(forKey: pid) {
+        oldChild.terminationStatus = terminationStatus
         oldChild.cleanup()
       }
     } while pid > 0

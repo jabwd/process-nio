@@ -69,8 +69,12 @@ let ffArgs2 = [
   "output2.mp4"
 ]
 
+let ffmpegPath = try ProcessNIO.findPathFor(name: "ffmpeg", eventLoopGroup: eventLoopGroup).wait()
+
+print("Detected FFmpeg path: \(ffmpegPath)")
+
 let process = try ProcessNIO(
-  path: "/usr/bin/ffmpeg",
+  path: ffmpegPath,
   args: ffArgs,
   eventLoopGroup: eventLoopGroup,
   onRead: { output in
@@ -83,7 +87,7 @@ let processFut = try process.run()
 print("First is running")
 
 let process2 = try ProcessNIO(
-  path: "/usr/bin/ffmpeg",
+  path: ffmpegPath,
   args: ffArgs2,
   eventLoopGroup: eventLoopGroup,
   onRead: { output in
@@ -93,12 +97,17 @@ let process2 = try ProcessNIO(
 print("Second is running")
 
 print("awaiting data now")
-try process2.fold([processFut], with: { _, _ in
+_ = try? process2.fold([processFut], with: { status1, status2 in
   print("Both processes done")
-  return process.channel.eventLoop.makeSucceededVoidFuture()
-}).wait()
-
-print("Done")
+  return process.channel.eventLoop.makeSucceededFuture(status1 + status2)
+}).always { result in
+  switch result {
+  case .success(let status):
+    print("Folded with: \(status)")
+  case .failure(let error):
+    print("Error: \(error)")
+  }
+}.wait()
 
 //
 //var nextLine: String = ""
