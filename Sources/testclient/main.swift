@@ -5,7 +5,7 @@ import Glibc
 #else
 import Darwin
 #endif
-import NIOPosix
+import ProcessNIO
 
 func trap(_ signum: Int32, action: @escaping SigactionHandler) {
   var sigAction = sigaction()
@@ -70,23 +70,27 @@ let ffArgs2 = [
 ]
 
 let process = try ProcessNIO(
-  path: "/usr/local/bin/ffmpeg",
+  path: "/usr/bin/ffmpeg",
   args: ffArgs,
   eventLoopGroup: eventLoopGroup,
   onRead: { output in
     print("FF1: \(output)")
   }
 )
+
+print("Going to run first")
 let processFut = try process.run()
+print("First is running")
 
 let process2 = try ProcessNIO(
-  path: "/usr/local/bin/ffmpeg",
+  path: "/usr/bin/ffmpeg",
   args: ffArgs2,
   eventLoopGroup: eventLoopGroup,
   onRead: { output in
     print("FF2: \(output)")
   }
 ).run()
+print("Second is running")
 
 print("awaiting data now")
 try process2.fold([processFut], with: { _, _ in
