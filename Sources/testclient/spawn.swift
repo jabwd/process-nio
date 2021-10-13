@@ -58,9 +58,11 @@ public final class ProcessManager {
     #else
     action.__sigaction_u = __sigaction_u.init(__sa_sigaction: handler)
     #endif
-    var oldAction = sigaction()
-    sigaction(SIGCHLD, &action, &oldAction)
-    oldSignalHandlers.append(oldAction)
+    var oldAction: sigaction? = sigaction()
+    sigaction(SIGCHLD, &action, &oldAction!)
+    if let oldActionUnwrapped = oldAction {
+      oldSignalHandlers.append(oldActionUnwrapped)
+    }
   }
 
   internal func register(process: ProcessNIO) {
@@ -74,6 +76,7 @@ public final class ProcessManager {
     for oldHandler in oldSignalHandlers {
       let oldAction = oldHandler
       #if os(Linux)
+      print("OLdAction handler: \(oldAction.__sigactionHandler)")
       let oldHandler = unsafeBitCast(oldAction.__sigaction_handler, to: SigactionHandler.self)
       #else
       if oldAction.__sigaction_u.__sa_handler == nil && oldAction.__sigaction_u.__sa_sigaction == nil {
