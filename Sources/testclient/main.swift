@@ -7,8 +7,6 @@ import Darwin
 #endif
 import NIOPosix
 
-typealias SigactionHandler = @convention(c)(Int32, UnsafeMutablePointer<siginfo_t>?, UnsafeMutableRawPointer?) -> Void
-
 func trap(_ signum: Int32, action: @escaping SigactionHandler) {
   var sigAction = sigaction()
   #if os(Linux)
@@ -47,59 +45,57 @@ let ffArgs = [
   "output.mp4"
 ]
 
-trap(SIGCHLD) { (sig, info, _) in
-  print("sig: \(sig)")
-}
+let ffArgs2 = [
+  "-hide_banner",
+  "-y",
+  "-i",
+  "input.mp4",
+  "-c:v",
+  "libx264",
+  "-movflags",
+  "+faststart",
+  "-pix_fmt",
+  "yuv420p",
+  "-preset",
+  "veryfast",
+  "-crf",
+  "23",
+  "-c:a",
+  "aac",
+  "-b:a",
+  "256k",
+  "-f",
+  "mp4",
+  "output2.mp4"
+]
 
 let process = try ProcessNIO(
   path: "/usr/local/bin/ffmpeg",
   args: ffArgs,
   eventLoopGroup: eventLoopGroup,
   onRead: { output in
-    print(output)
-  },
-  onFinished: { 
-    print("Process done")
+    print("FF1: \(output)")
   }
 )
+let processFut = try process.run()
+
+let process2 = try ProcessNIO(
+  path: "/usr/local/bin/ffmpeg",
+  args: ffArgs2,
+  eventLoopGroup: eventLoopGroup,
+  onRead: { output in
+    print("FF2: \(output)")
+  }
+).run()
 
 print("awaiting data now")
-try process.channel.closeFuture.wait()
+try process2.fold([processFut], with: { _, _ in
+  print("Both processes done")
+  return process.channel.eventLoop.makeSucceededVoidFuture()
+}).wait()
 
 print("Done")
 
-//exit(0)
-//
-//let q = DispatchQueue(label: "ffmpeg")
-//
-//let threadPool = NIOThreadPool(numberOfThreads: 1)
-//threadPool.start()
-//let fileIO = NonBlockingFileIO(threadPool: threadPool)
-//
-//let eventLoop = eventLoopGroup.next()
-//
-//guard let ffmpegURL = ChildProcess.findURLFor(name: "ffmpeg") else {
-//  fatalError("Unable to find FFmpeg")
-//}
-//
-//print("FFmpeg at: \(ffmpegURL)")
-//let child = ChildProcess.init(executableURL: ffmpegURL)
-//
-//let args = [
-//  "-hide_banner",
-//  "-y",
-//  "-i",
-//  "stmary.mp4",
-//  "-c:v",
-//  "copy",
-//  "-c:a",
-//  "aac",
-//  "-b:a",
-//  "256k",
-//  "-f",
-//  "mp4",
-//  "output.mp4"
-//]
 //
 //var nextLine: String = ""
 //func checkLine() -> String? {
