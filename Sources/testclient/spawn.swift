@@ -12,10 +12,6 @@ import Darwin
 #endif
 import NIO
 
-enum POSIXError: Error {
-  case nonZeroStatus(Int32)
-}
-
 public typealias ProcessOutputHandler = (String) -> Void
 public typealias ProcessFinishedHandler = () -> Void
 
@@ -43,10 +39,9 @@ public final class ProcessChannelHandler: ChannelInboundHandler {
   }
 }
 
-
-
 public enum ProcessNIOError: Error {
-  case spawnFailed(Int32)
+  case spawnFailed(Int32, reason: String?)
+  case fileNotFound
 }
 
 public final class ProcessManager {
@@ -58,44 +53,49 @@ public final class ProcessManager {
   init() {
     var action = sigaction()
     let handler: SigactionHandler = { (signo, info, context) in
-      var info = info
-      ProcessManager.shared.handleSignal(signo, action: &info, context: context)
+      guard let info = info else {
+        return
+      }
+      ProcessManager.shared.handleSignal(signo, info, context)
     }
+    #if os(Linux)
     action.__sigaction_handler = unsafeBitCast(handler, to: sigaction.__Unnamed_union___sigaction_handler.self)
+    #else
+    action.__sigaction_u = __sigaction_u.init(__sa_sigaction: handler)
+    #endif
     var oldAction = sigaction()
     sigaction(SIGCHLD, &action, &oldAction)
     oldSignalHandlers.append(oldAction)
   }
 
-  func launch(
-    path: String,
-    args: [String],
-    eventLoopGroup: EventLoopGroup,
-    onRead readHandler: ProcessOutputHandler? = nil,
-    onFinished finishedHandler: ProcessFinishedHandler? = nil
-    ) throws -> ProcessNIO {
-    let process = try ProcessNIO(path: path, args: args, eventLoopGroup: eventLoopGroup, onRead: readHandler, onFinished: finishedHandler)
+  internal func register(process: ProcessNIO) {
     self.children[process.pid] = process
-    return process
   }
 
-  func handleSignal(_ signo: Int32, action: inout sigaction, context: UnsafeMutableRawPointer?) {
+  func handleSignal(_ signo: Int32, _ info: UnsafeMutablePointer<siginfo_t>?, _ context: UnsafeMutableRawPointer?) {
     for oldHandler in oldSignalHandlers {
       let oldAction = oldHandler
+      #if os(Linux)
       let oldHandler = unsafeBitCast(oldAction.__sigaction_handler, to: SigactionHandler.self)
-      oldHandler(signo, oldAction, nil)
-    }
-    closeFinishedChildren()
-  }
-
-  func closeFinishedChildren() {
-    for (pid, process) in children {
-      var status: Int32 = -1
-      waitpid(pid, &status, WNOHANG)
-      if (status != 0) {
-        print("Cleaning up process")
-        process.cleanup()
+      #else
+      if oldAction.__sigaction_u.__sa_handler == nil && oldAction.__sigaction_u.__sa_sigaction == nil {
+        continue
       }
+      let oldHandler = unsafeBitCast(oldAction.__sigaction_u, to: SigactionHandler.self)
+      #endif
+      oldHandler(signo, info, context)
+    }
+    guard let info = info else {
+      return
+    }
+
+    let pid = info.pointee.si_pid
+    if let oldChild = children[pid] {
+      print("Closing child at PID \(pid)")
+      var status: Int32 = 0
+      waitpid(pid, &status, WNOHANG)
+      oldChild.cleanup()
+      children.removeValue(forKey: pid)
     }
   }
 
@@ -151,16 +151,21 @@ public final class ProcessNIO {
     var newPid: Int32 = -1
     let rc = posix_spawn(&newPid, path, &fileActions, nil, unsafeArgs, nil)
     guard rc == 0 else {
+      if rc == ENOENT {
+        throw ProcessNIOError.fileNotFound
+      }
       let err = strerror(rc)
-      let str = String(cString: err!)
-      print("str: \(str)")
-      throw ProcessNIOError.spawnFailed(rc)
+      if let err = err {
+        throw ProcessNIOError.spawnFailed(rc, reason: String(cString: err))
+      }
+      throw ProcessNIOError.spawnFailed(rc, reason: nil)
     }
 
     pid = newPid
+    ProcessManager.shared.register(process: self)
   }
 
-  func cleanup() {
+  internal func cleanup() {
     _ = channel.close().always { [weak self] _ in
       guard let self = self else {
         return
