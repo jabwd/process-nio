@@ -16,49 +16,133 @@ enum POSIXError: Error {
   case nonZeroStatus(Int32)
 }
 
+public typealias ProcessOutputHandler = (String) -> Void
+public typealias ProcessFinishedHandler = () -> Void
+
 public final class ProcessChannelHandler: ChannelInboundHandler {
   public typealias InboundIn = ByteBuffer
+  public var outputHandler: ProcessOutputHandler?
+  public var processFinishedHandler: ProcessFinishedHandler?
+
+  init(outputHandler: ProcessOutputHandler? = nil, finishedHandler: ProcessFinishedHandler? = nil) {
+    self.outputHandler = outputHandler
+    self.processFinishedHandler = finishedHandler
+  }
 
   public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
     let inboundData = self.unwrapInboundIn(data)
 
-    let str = String(bytes: inboundData.readableBytesView, encoding: .utf8) ?? "Read failed"
-    print("Channel read: \(str)")
+    guard let str = String(bytes: inboundData.readableBytesView, encoding: .utf8) else {
+      return
+    }
+    outputHandler?(str)
   }
 
   public func channelInactive(context: ChannelHandlerContext) {
-    print("Channel inactive")
+    processFinishedHandler?()
   }
 }
+
+
 
 public enum ProcessNIOError: Error {
   case spawnFailed(Int32)
 }
 
+public final class ProcessManager {
+  private var children: [Int32: ProcessNIO] = [:]
+  var oldSignalHandlers: [sigaction] = []
+
+  static let shared = ProcessManager()
+
+  init() {
+    var action = sigaction()
+    let handler: SigactionHandler = { (signo, info, context) in
+      var info = info
+      ProcessManager.shared.handleSignal(signo, action: &info, context: context)
+    }
+    action.__sigaction_handler = unsafeBitCast(handler, to: sigaction.__Unnamed_union___sigaction_handler.self)
+    var oldAction = sigaction()
+    sigaction(SIGCHLD, &action, &oldAction)
+    oldSignalHandlers.append(oldAction)
+  }
+
+  func launch(
+    path: String,
+    args: [String],
+    eventLoopGroup: EventLoopGroup,
+    onRead readHandler: ProcessOutputHandler? = nil,
+    onFinished finishedHandler: ProcessFinishedHandler? = nil
+    ) throws -> ProcessNIO {
+    let process = try ProcessNIO(path: path, args: args, eventLoopGroup: eventLoopGroup, onRead: readHandler, onFinished: finishedHandler)
+    self.children[process.pid] = process
+    return process
+  }
+
+  func handleSignal(_ signo: Int32, action: inout sigaction, context: UnsafeMutableRawPointer?) {
+    for oldHandler in oldSignalHandlers {
+      let oldAction = oldHandler
+      let oldHandler = unsafeBitCast(oldAction.__sigaction_handler, to: SigactionHandler.self)
+      oldHandler(signo, oldAction, nil)
+    }
+    closeFinishedChildren()
+  }
+
+  func closeFinishedChildren() {
+    for (pid, process) in children {
+      var status: Int32 = -1
+      waitpid(pid, &status, WNOHANG)
+      if (status != 0) {
+        print("Cleaning up process")
+        process.cleanup()
+      }
+    }
+  }
+
+  deinit {
+    for child in children {
+      child.value.cleanup()
+    }
+  }
+}
+
 public final class ProcessNIO {
   public let channel: Channel
   public let pid: Int32
+  private let readDescriptor: Int32
+  private let writeDescriptor: Int32
 
   public static func findPathFor(name: String) -> String? {
     return nil
   }
 
-  public init(path: String, args: [String], eventLoopGroup: EventLoopGroup) throws {
+  public init(
+    path: String,
+    args: [String],
+    eventLoopGroup: EventLoopGroup,
+    onRead readHandler: ProcessOutputHandler? = nil,
+    onFinished finishedHandler: ProcessFinishedHandler? = nil
+  ) throws {
     var fileDescriptors: [Int32] = [Int32](repeating: 0, count: 2)
     pipe(&fileDescriptors)
-    let readDescriptor = fileDescriptors[0]
-    let writeDescriptor = fileDescriptors[1]
+    readDescriptor = fileDescriptors[0]
+    writeDescriptor = fileDescriptors[1]
 
     channel = try NIOPipeBootstrap(group: eventLoopGroup)
       .channelOption(ChannelOptions.maxMessagesPerRead, value: 1)
       .channelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
       .channelInitializer({ channel in
-        channel.pipeline.addHandler(ProcessChannelHandler())
+        channel.pipeline.addHandler(ProcessChannelHandler(outputHandler: readHandler, finishedHandler: finishedHandler))
       })
       .withPipes(inputDescriptor: readDescriptor, outputDescriptor: writeDescriptor).wait()
 
+    #if os(Linux)
+    var fileActions = posix_spawn_file_actions_t()
+    #else
     var fileActions: posix_spawn_file_actions_t?
+    #endif
     posix_spawn_file_actions_init(&fileActions)
+    defer { posix_spawn_file_actions_destroy(&fileActions) }
     posix_spawn_file_actions_adddup2(&fileActions, writeDescriptor, STDERR_FILENO)
     posix_spawn_file_actions_adddup2(&fileActions, writeDescriptor, STDOUT_FILENO)
 
@@ -67,38 +151,22 @@ public final class ProcessNIO {
     var newPid: Int32 = -1
     let rc = posix_spawn(&newPid, path, &fileActions, nil, unsafeArgs, nil)
     guard rc == 0 else {
+      let err = strerror(rc)
+      let str = String(cString: err!)
+      print("str: \(str)")
       throw ProcessNIOError.spawnFailed(rc)
     }
-    posix_spawn_file_actions_destroy(&fileActions)
-    fileActions = nil
 
     pid = newPid
   }
-}
 
-func spawn(_ path: String, args: [String]) throws -> Int32 {
-  var bla: [Int32] = [Int32](repeating: 0, count: 2)
-  Darwin.pipe(&bla)
-
-  var actions_t: posix_spawn_file_actions_t?
-  posix_spawn_file_actions_init(&actions_t)
-  posix_spawn_file_actions_adddup2(&actions_t, bla[1], STDERR_FILENO)
-  posix_spawn_file_actions_adddup2(&actions_t, bla[1], STDOUT_FILENO)
-
-  let completeArgs = [path] + args
-  let unsafeArgs = completeArgs.map { $0.withCString(strdup) } + [nil]
-  var pid: Int32 = -1
-  let rc = posix_spawn(&pid, path, &actions_t, nil, unsafeArgs, nil)
-  posix_spawn_file_actions_destroy(&actions_t)
-  guard rc == 0 else {
-    throw POSIXError.nonZeroStatus(rc)
+  func cleanup() {
+    _ = channel.close().always { [weak self] _ in
+      guard let self = self else {
+        return
+      }
+      close(self.readDescriptor)
+      close(self.writeDescriptor)
+    }
   }
-  var status: Int32 = -1
-  waitpid(pid, &status, 0)
-  print("RC: \(rc) \(status)")
-  var bytes: [UInt8] = [UInt8](repeating: 0, count: 2048)
-  read(bla[0], &bytes, bytes.count)
-  let str = String(bytes: bytes, encoding: .utf8)
-  print("str: \(String(describing: str))")
-  return pid
 }

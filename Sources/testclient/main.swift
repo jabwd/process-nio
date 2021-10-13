@@ -7,6 +7,16 @@ import Darwin
 #endif
 import NIOPosix
 
+typealias SigactionHandler = @convention(c)(Int32, sigaction, UnsafeMutableRawPointer?) -> Void
+
+func trap(_ signum: Int32, action: @escaping SigactionHandler) {
+    var sigAction = sigaction()
+    #if os(Linux)
+        sigAction.__sigaction_handler = unsafeBitCast(action, to: sigaction.__Unnamed_union___sigaction_handler.self)
+        sigaction(signum, &sigAction, nil)
+    #endif
+}
+
 let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
 defer { try! eventLoopGroup.syncShutdownGracefully() }
 
@@ -34,12 +44,27 @@ let ffArgs = [
   "output2.mp4"
 ]
 
-let process = try ProcessNIO(path: "/usr/local/bin/ffmpeg", args: ffArgs, eventLoopGroup: eventLoopGroup)
+/*let process = try ProcessNIO(path: "/usr/bin/ffmpeg", args: ffArgs, eventLoopGroup: eventLoopGroup)*/
+
+// print("PID: \(process.pid)")
+trap(SIGCHLD) { (sig, info, _) in
+  print("sig: \(sig)")
+}
+
+let process = try ProcessManager.shared.launch(
+  path: "/usr/bin/ffmpeg",
+  args: ffArgs,
+  eventLoopGroup: eventLoopGroup,
+  onRead: { output in
+    print(output)
+  },
+  onFinished: { 
+    print("Process done")
+  }
+)
 
 print("awaiting data now :)")
 try process.channel.closeFuture.wait()
-
-// var bla2 = try spawn("/usr/local/bin/ffmpeg", args: ffArgs)
 
 print("Done")
 
