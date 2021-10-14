@@ -39,10 +39,9 @@ public final class ProcessManager {
         continue
       }
       #else
-      if oldAction.__sigaction_u.__sa_handler == nil && oldAction.__sigaction_u.__sa_sigaction == nil {
+      guard let oldHandler = oldAction.__sigaction_u.__sa_sigaction else {
         continue
       }
-      let oldHandler = oldAction.__sigaction_u.__sa_sigaction
       #endif
       oldHandler(signo, info, context)
     }

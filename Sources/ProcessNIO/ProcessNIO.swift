@@ -96,7 +96,7 @@ public final class ProcessNIO {
     let completedArgs = [path] + arguments
     let unsafeArgs = completedArgs.map { $0.withCString(strdup) } + [nil]
     var newPid: Int32 = -1
-    let rc = posix_spawn(&newPid, path, &fileActions, nil, unsafeArgs, nil)
+    let rc = posix_spawn(&newPid, path, &fileActions, nil, unsafeArgs, environ)
     guard rc == 0 else {
       if rc == ENOENT {
         throw ProcessNIOError.fileNotFound
