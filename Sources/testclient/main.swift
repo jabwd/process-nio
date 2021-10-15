@@ -145,41 +145,36 @@ let ffArgs2 = [
   "output2.mp4"
 ]
 
-let ffmpegPath = try ProcessNIO.findPathFor(name: "ffmpeg", eventLoopGroup: eventLoopGroup).wait()
-
-print("Detected FFmpeg path: \(ffmpegPath)")
-
 let progress1Handler = FFmpegProgressHandler(durationInSeconds: 26.41) { progress in
   let percentage = progress * 100
   print("Encoding: \(percentage)%")
 }
-let process = try ProcessNIO(
-  path: ffmpegPath,
-  args: ffArgs,
-  eventLoopGroup: eventLoopGroup,
-  onRead: progress1Handler.onRead
+let process = ProcessNIO(
+  .name("ffmpeg"),
+  arguments: ffArgs,
+  eventLoopGroup: eventLoopGroup
 )
 
 print("Going to run first")
-let processFut = try process.run()
+let processFut = process.run(on: eventLoopGroup.next(), onRead: progress1Handler.onRead)
 print("First is running")
 
 let progress2Handler = FFmpegProgressHandler(durationInSeconds: 26.41) { progress in
   print("Encoding: \(progress*100)%")
 }
 
-let process2 = try ProcessNIO(
-  path: ffmpegPath,
-  args: ffArgs2,
-  eventLoopGroup: eventLoopGroup,
-  onRead: progress2Handler.onRead
-).run()
+let eventLoop = eventLoopGroup.next()
+let process2 = ProcessNIO(
+  .name("ffmpeg"),
+  arguments: ffArgs2,
+  eventLoopGroup: eventLoopGroup
+).run(on: eventLoop, onRead: progress2Handler.onRead)
 print("Second is running")
 
 print("awaiting data now")
 _ = try? process2.fold([processFut], with: { (status1, status2) -> EventLoopFuture<Int32> in
   print("Both processes done")
-  return process.channel.eventLoop.makeSucceededFuture(status1 + status2)
+  return eventLoop.makeSucceededFuture(status1 + status2)
 }).always { result in
   switch result {
   case .success(let status):

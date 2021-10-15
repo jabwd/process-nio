@@ -56,6 +56,7 @@ public final class ProcessManager {
       }
       let terminationStatus = (status & 0xFF00) >> 8
       if let oldChild = children.removeValue(forKey: pid) {
+        print("Cleaning up ze child")
         oldChild.terminationStatus = terminationStatus
         oldChild.cleanup()
       }
