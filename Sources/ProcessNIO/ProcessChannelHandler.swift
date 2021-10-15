@@ -19,8 +19,4 @@ public final class ProcessChannelHandler: ChannelInboundHandler {
     }
     outputHandler?(str)
   }
-
-  public func channelInactive(context: ChannelHandlerContext) {
-    print("Channel dieded")
-  }
 }

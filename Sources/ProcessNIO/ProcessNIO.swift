@@ -84,11 +84,19 @@ public final class ProcessNIO {
       let completedArgs = [CommandLine.arguments.first ?? ""] + arguments
       let unsafeArgs = completedArgs.map { $0.withCString(strdup) } + [nil]
       rc = posix_spawnp(&newPid, name, &fileActions, nil, unsafeArgs, environ)
+      // Free up uncleanly duplicated strings
+      for arg in unsafeArgs {
+        arg?.deallocate()
+      }
       break
     case .path(let path):
       let completedArgs = [path] + arguments
       let unsafeArgs = completedArgs.map { $0.withCString(strdup) } + [nil]
       rc = posix_spawn(&newPid, path, &fileActions, nil, unsafeArgs, environ)
+      // Free up uncleanly duplicated strings
+      for arg in unsafeArgs {
+        arg?.deallocate()
+      }
       break
     }
 
