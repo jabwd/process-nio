@@ -40,8 +40,8 @@ final class FFmpegProgressHandler {
     self.durationInSeconds = durationInSeconds
   }
 
-  func onRead(_ output: String) {
-    outputBuffer += output
+  func onRead(_ output: [UInt8]) {
+    outputBuffer += String(bytes: output, encoding: .utf8) ?? ""
     checkForLine()
   }
 
