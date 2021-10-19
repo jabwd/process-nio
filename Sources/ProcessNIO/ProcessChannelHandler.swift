@@ -13,6 +13,7 @@ public final class ProcessChannelHandler: ChannelInboundHandler {
 
   public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
     let inboundData = self.unwrapInboundIn(data)
-    outputHandler?(Array(inboundData.readableBytesView))
+    let bytes = Array(inboundData.readableBytesView)
+    outputHandler?(bytes)
   }
 }

@@ -58,8 +58,6 @@ public final class ProcessNIO {
 
   public func run(on eventLoop: EventLoop, onRead readHandler: ProcessOutputHandler? = nil) -> EventLoopFuture<Int32> {
     let channelFuture = NIOPipeBootstrap(group: eventLoopGroup)
-      .channelOption(ChannelOptions.maxMessagesPerRead, value: 1)
-      .channelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
       .channelInitializer({ channel in
         channel.pipeline.addHandler(ProcessChannelHandler(outputHandler: readHandler))
       })
