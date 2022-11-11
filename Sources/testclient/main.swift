@@ -101,7 +101,7 @@ let ffArgs = [
   "-hide_banner",
   "-y",
   "-i",
-  "input.mp4",
+  "/Users/jabwd/Desktop/input.mp4",
   "-c:v",
   "libx264",
   "-movflags",
@@ -125,7 +125,7 @@ let ffArgs2 = [
   "-hide_banner",
   "-y",
   "-i",
-  "input.mp4",
+  "/Users/jabwd/Desktop/input.mp4",
   "-c:v",
   "libx264",
   "-movflags",
@@ -150,7 +150,7 @@ let progress1Handler = FFmpegProgressHandler(durationInSeconds: 26.41) { progres
   print("Encoding: \(percentage)%")
 }
 let process = ProcessNIO(
-  .name("ffmpeg"),
+  .path("/opt/homebrew/bin/ffmpeg"),
   arguments: ffArgs,
   eventLoopGroup: eventLoopGroup
 )
@@ -165,7 +165,7 @@ let progress2Handler = FFmpegProgressHandler(durationInSeconds: 26.41) { progres
 
 let eventLoop = eventLoopGroup.next()
 let process2 = ProcessNIO(
-  .name("ffmpeg"),
+  .path("/opt/homebrew/bin/ffmpeg"),
   arguments: ffArgs2,
   eventLoopGroup: eventLoopGroup
 ).run(on: eventLoop, onRead: progress2Handler.onRead)

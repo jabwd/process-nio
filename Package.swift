@@ -19,7 +19,7 @@ let package = Package(
     )
   ],
   dependencies: [
-    .package(name: "swift-nio", url: "https://github.com/apple/swift-nio.git", from: "2.33.0"),
+    .package(name: "swift-nio", url: "https://github.com/apple/swift-nio.git", from: "2.44.0"),
   ],
   targets: [
     .executableTarget(
